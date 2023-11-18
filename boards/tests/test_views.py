@@ -3,7 +3,7 @@ from django.test import TestCase, Client
 from rest_framework import status
 from django.urls import reverse
 from boards.models import User, Profile, Project, ProjectMembership, Task, Board
-from boards.serializers import UserSerializer, ProfileSerializer, ProjectListSerializer, ProjectSerializer
+from boards.serializers import UserSerializer, ProfileSerializer, ProjectListSerializer, ProjectSerializer, ProjectMembershipSerializer
 from boards.permissions import CanViewProfile, CanEditProject
 from boards.views import ProfileDetailView
 
@@ -183,4 +183,38 @@ class ProjectDetailViewTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.project.refresh_from_db()
         self.assertEqual(self.project.title, 'Changed Title')
+
+
+class ProjectMemberListViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='testuser', password='testpassword')
+        self.profile = Profile.objects.get(user=self.user)
+        self.project = Project.objects.create(title='Test Project', description='Project Description', owner=self.profile)
+        self.url = reverse('members_list', kwargs={'pk': self.project.pk})
+        self.client.force_authenticate(user=self.user)
+
+    def create_project_membership(self, access_level=ProjectMembership.Access.MEMBER):
+        self.user2 = User.objects.create_user(username='testuser2', password='testpassword2')
+        self.profile2 = Profile.objects.get(user=self.user2)
+        return ProjectMembership.objects.create(project=self.project, member=self.profile2, access_level=access_level)
+
+    def test_list_project_members(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_list_project_members_invalid_project_id(self):
+        invalid_url = reverse('project_detail', kwargs={'pk': 999})  # Assuming project ID 999 does not exist
+        response = self.client.get(invalid_url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_add_project_member(self):
+        self.user2 = User.objects.create_user(username='testuser2', password='testpassword2')
+        self.profile2 = Profile.objects.get(user=self.user2)
+        data = {'project': self.project.pk, 'member': self.profile2.pk, 'access_level': ProjectMembership.Access.MEMBER}
+        response = self.client.post(self.url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(ProjectMembership.objects.count(), 2)
+        self.assertEqual(str(ProjectMembership.objects.get(access_level=1)), f'{self.profile2} | {self.project.title}')
+
 
